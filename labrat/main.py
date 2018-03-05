@@ -1,6 +1,12 @@
 import click
 import gitlab
-import subprocess
+import json
+import logging
+import webbrowser
+
+from labrat import git
+
+LOG = logging.getLogger(__name__)
 
 DEFAULT_GITLAB_URL = 'https://gitlab.com'
 GITLAB_PROJECT_FEATURES = {
@@ -17,17 +23,6 @@ GITLAB_PROJECT_FEATURES = {
 }
 
 
-def git_config_value(key):
-    try:
-        value = subprocess.check_output(
-            ['git', 'config', '--get', key]
-        ).strip()
-    except subprocess.CalledProcessError:
-        value = None
-
-    return value
-
-
 def find_group_by_name(api, name):
     for group in api.groups.list():
         if group.name == name:
@@ -41,17 +36,23 @@ def find_group_by_name(api, name):
               metavar='TOKEN')
 @click.option('--url', '-u', envvar='GITLAB_URL',
               metavar='URL')
+@click.option('--debug', 'loglevel', flag_value='DEBUG', default='WARNING')
+@click.option('--verbose', 'loglevel', flag_value='INFO')
 @click.pass_context
-def cli(ctx, token, url):
+def cli(ctx, token, url, loglevel):
+    logging.basicConfig(level=loglevel)
+
     if token is None:
-        token = git_config_value('gitlab.token')
+        token = git.git_config_value('gitlab.token')
     if token is None:
         raise click.ClickException('missing gitlab API token')
 
     if url is None:
-        url = git_config_value('gitlab.url')
+        url = git.git_config_value('gitlab.url')
     if url is None:
         url = DEFAULT_GITLAB_URL
+
+    LOG.info('using gitlab url: %s', url)
 
     ctx.obj = gitlab.Gitlab(url, token)
     ctx.obj.auth()
@@ -115,13 +116,24 @@ def delete(ctx, name):
 
 
 @cli.command()
-def fork():
-    raise click.ClickException('Not implemented')
+@click.option('--namespace', '-n')
+@click.pass_context
+def fork(ctx, namespace):
+    if namespace is None:
+        namespace = ctx.obj.user.id
+
+    origin = git.git_get_origin()
+    project = ctx.obj.projects.get(origin.path)
+    res = project.forks.create(dict(namespace=namespace))
+    print(res.web_url)
 
 
 @cli.command()
-def open():
-    raise click.ClickException('Not implemented')
+@click.pass_context
+def open(ctx):
+    origin = git.git_get_origin()
+    project = ctx.obj.projects.get(origin.path)
+    webbrowser.open(project.web_url)
 
 
 @cli.command()
@@ -200,3 +212,6 @@ def snippet_show():
     pass
 
 
+@cli.command(name='get-origin')
+def get_origin():
+    print(json.dumps(git.git_get_origin()))

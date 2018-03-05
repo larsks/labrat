@@ -10,11 +10,19 @@ GitRemote = collections.namedtuple(
     ['scheme', 'user', 'host', 'port', 'path'])
 
 
+def get_toplevel():
+    toplevel = subprocess.check_output(
+        ['git', 'rev-parse', '--show-toplevel']
+    ).strip().decode('utf8')
+
+    return toplevel
+
+
 def git_config_value(key):
     try:
         value = subprocess.check_output(
             ['git', 'config', '--get', key]
-        ).strip()
+        ).strip().decode('utf8')
     except subprocess.CalledProcessError:
         value = None
 

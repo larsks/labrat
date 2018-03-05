@@ -2,6 +2,7 @@ import click
 import gitlab
 import json
 import logging
+import os
 import webbrowser
 
 from labrat import git
@@ -23,12 +24,40 @@ GITLAB_PROJECT_FEATURES = {
 }
 
 
-def find_group_by_name(api, name):
-    for group in api.groups.list():
-        if group.name == name:
-            return group
+class Labrat(object):
+    def __init__(self, url=None, token=None, **options):
+        self.options = options
 
-    raise KeyError(name)
+        if url is None:
+            url = git.git_config_value('gitlab.url')
+        if url is None:
+            url = DEFAULT_GITLAB_URL
+
+        if token is None:
+            token = git.git_config_value('gitlab.token')
+        if token is None:
+            raise click.ClickException('missing gitlab API token')
+
+        LOG.info('using gitlab url: %s', url)
+        self.api = gitlab.Gitlab(url, token)
+        self.api.auth()
+
+    def find_group_by_name(self, name):
+        for group in self.api.groups.list():
+            if group.name == name:
+                return group
+
+        raise KeyError(name)
+
+    def get_project_from_git(self):
+        origin = git.git_get_origin()
+
+        try:
+            project = self.api.projects.get(origin.path)
+            return project
+        except gitlab.exceptions.GitlabGetError:
+            raise click.ClickException(
+                'unable to locate project named %s' % origin.path)
 
 
 @click.group()
@@ -36,26 +65,14 @@ def find_group_by_name(api, name):
               metavar='TOKEN')
 @click.option('--url', '-u', envvar='GITLAB_URL',
               metavar='URL')
-@click.option('--debug', 'loglevel', flag_value='DEBUG', default='WARNING')
+@click.option('--debug', 'loglevel', flag_value='DEBUG')
 @click.option('--verbose', 'loglevel', flag_value='INFO')
+@click.option('--quiet', 'loglevel', flag_value='WARNING', default=True)
+@click.option('--force', is_flag=True, default=False)
 @click.pass_context
-def cli(ctx, token, url, loglevel):
+def cli(ctx, token, url, loglevel, force):
     logging.basicConfig(level=loglevel)
-
-    if token is None:
-        token = git.git_config_value('gitlab.token')
-    if token is None:
-        raise click.ClickException('missing gitlab API token')
-
-    if url is None:
-        url = git.git_config_value('gitlab.url')
-    if url is None:
-        url = DEFAULT_GITLAB_URL
-
-    LOG.info('using gitlab url: %s', url)
-
-    ctx.obj = gitlab.Gitlab(url, token)
-    ctx.obj.auth()
+    ctx.obj = Labrat(url, token, force=force)
 
 
 @cli.command()
@@ -71,10 +88,14 @@ def cli(ctx, token, url, loglevel):
               multiple=True)
 @click.option('--import-url')
 @click.option('--tag', multiple=True)
-@click.argument('name')
+@click.argument('name', default=None, required=False)
 @click.pass_context
 def create(ctx, group, description, visibility, enable, disable,
            import_url, tag, name):
+    lab = ctx.obj
+
+    if name is None:
+        name = os.path.basename(git.get_toplevel())
 
     if group is None and '/' in name:
         group, name = name.split('/', 1)
@@ -85,7 +106,7 @@ def create(ctx, group, description, visibility, enable, disable,
         if group.isdigit():
             data['namespace_id'] = int(group)
         else:
-            data['namespace_id'] = find_group_by_name(ctx.obj, group).id
+            data['namespace_id'] = lab.find_group_by_name(group).id
 
     if description is not None:
         data['description'] = description
@@ -104,7 +125,8 @@ def create(ctx, group, description, visibility, enable, disable,
     if tag:
         data['tag_list'] = tag
 
-    project = ctx.obj.projects.create(data)
+    LOG.debug('create %s', data)
+    project = lab.api.projects.create(data)
     print(project.web_url)
 
 
@@ -112,27 +134,52 @@ def create(ctx, group, description, visibility, enable, disable,
 @click.argument('name')
 @click.pass_context
 def delete(ctx, name):
-    ctx.obj.projects.delete(name)
+    lab = ctx.obj
+    lab.api.projects.delete(name)
 
 
 @cli.command()
 @click.option('--namespace', '-n')
 @click.pass_context
 def fork(ctx, namespace):
+    lab = ctx.obj
+
     if namespace is None:
         namespace = ctx.obj.user.id
 
-    origin = git.git_get_origin()
-    project = ctx.obj.projects.get(origin.path)
+    project = lab.get_project_from_git()
+
+    LOG.info('forking project %s', project.name)
     res = project.forks.create(dict(namespace=namespace))
+
+    remote_name = lab.api.user.name
+    LOG.info('creating remote %s', remote_name)
+    if git.remote_exists(remote_name):
+        if not lab.api.options.force:
+            pass
+
     print(res.web_url)
 
 
 @cli.command()
 @click.pass_context
+def info(ctx):
+    lab = ctx.obj
+    project = lab.get_project_from_git()
+    data = {k: getattr(project, k)
+            for k in ['name', 'id', 'description', 'web_url',
+                      'ssh_url_to_repo', 'http_url_to_repo',
+                      'last_activity_at']
+            if hasattr(project, k)}
+    print(json.dumps(data, indent=2, sort_keys=True))
+
+
+@cli.command()
+@click.pass_context
 def open(ctx):
-    origin = git.git_get_origin()
-    project = ctx.obj.projects.get(origin.path)
+    lab = ctx.obj
+
+    project = lab.get_project_from_git()
     webbrowser.open(project.web_url)
 
 
@@ -140,13 +187,15 @@ def open(ctx):
 @click.option('--group', '-g')
 @click.pass_context
 def list(ctx, group):
+    lab = ctx.obj
+
     if group is not None:
         if group.isdigit():
-            target = ctx.obj.groups.get(group)
+            target = lab.api.groups.get(group)
         else:
-            target = find_group_by_name(ctx.obj, group)
+            target = lab.find_group_by_name(group)
     else:
-        target = ctx.obj.users.get(ctx.obj.user.id)
+        target = lab.api.users.get(lab.api.user.id)
 
     for project in target.projects.list():
         print(project.name, project.web_url)
@@ -172,7 +221,7 @@ def issue_show():
     pass
 
 
-@cli.group()
+@cli.group(name='merge-request')
 def merge_request():
     pass
 

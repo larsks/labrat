@@ -69,3 +69,27 @@ def git_get_origin():
         host, port = host, None
 
     return GitRemote(scheme, user, host, port, path)
+
+
+def git_remote_set_url(remote_name, url):
+    subprocess.check_call(
+        ['git', 'remote', 'set-url', remote_name, url]
+    )
+
+
+def git_remote_create(remote_name, url):
+    subprocess.check_call(
+        ['git', 'remote', 'add', remote_name, url]
+    )
+
+
+def git_remote_exists(remote_name):
+    try:
+        subprocess.check_call(
+            ['git', 'remote', 'get-url', remote_name],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+    except subprocess.CalledProcessError:
+        return False
+    else:
+        return True

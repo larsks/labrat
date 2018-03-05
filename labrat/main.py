@@ -24,9 +24,27 @@ GITLAB_PROJECT_FEATURES = {
 }
 
 
+class LabratOptions(object):
+    force = False
+    loglevel = logging.WARNING
+
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            if hasattr(self, k):
+                setattr(self, k, v)
+            else:
+                raise AttributeError(k)
+
+    def __setattr__(self, k, v):
+        if not hasattr(self, k):
+            raise AttributeError(k)
+
+        super().__setattr__(k, v)
+
+
 class Labrat(object):
     def __init__(self, url=None, token=None, **options):
-        self.options = options
+        self.options = LabratOptions(**options)
 
         if url is None:
             url = git.git_config_value('gitlab.url')
@@ -61,18 +79,20 @@ class Labrat(object):
 
 
 @click.group()
-@click.option('--token', '-t', envvar='GITLAB_API_TOKEN',
+@click.option('--token', '-t', envvar='GITLAB_TOKEN',
               metavar='TOKEN')
 @click.option('--url', '-u', envvar='GITLAB_URL',
               metavar='URL')
 @click.option('--debug', 'loglevel', flag_value='DEBUG')
 @click.option('--verbose', 'loglevel', flag_value='INFO')
 @click.option('--quiet', 'loglevel', flag_value='WARNING', default=True)
-@click.option('--force', is_flag=True, default=False)
+@click.option('--force', '-f', is_flag=True, default=False)
 @click.pass_context
 def cli(ctx, token, url, loglevel, force):
     logging.basicConfig(level=loglevel)
-    ctx.obj = Labrat(url, token, force=force)
+    ctx.obj = Labrat(url, token,
+                     loglevel=loglevel,
+                     force=force)
 
 
 @cli.command()
@@ -140,25 +160,40 @@ def delete(ctx, name):
 
 @cli.command()
 @click.option('--namespace', '-n')
+@click.option('--use-ssh-url', 'schema', flag_value='ssh', default=True)
+@click.option('--use-http-url', 'schema', flag_value='http')
 @click.pass_context
-def fork(ctx, namespace):
+def fork(ctx, namespace, schema):
     lab = ctx.obj
 
     if namespace is None:
-        namespace = ctx.obj.user.id
+        namespace = lab.api.user.username
 
     project = lab.get_project_from_git()
 
-    LOG.info('forking project %s', project.name)
-    res = project.forks.create(dict(namespace=namespace))
+    LOG.info('forking project %s to %s', project.name, namespace)
+    fork = project.forks.create(dict(namespace=namespace))
 
-    remote_name = lab.api.user.name
-    LOG.info('creating remote %s', remote_name)
-    if git.remote_exists(remote_name):
-        if not lab.api.options.force:
-            pass
+    if schema == 'ssh':
+        url = fork.ssh_url_to_repo
+    elif schema == 'http':
+        url = fork.http_url_to_repo
+    else:
+        raise click.ClickException('unknown schema: %s', schema)
 
-    print(res.web_url)
+    remote_name = lab.api.user.username
+    if git.git_remote_exists(remote_name):
+        if not lab.options.force:
+            raise click.ClickException('A remote named "%s" already '
+                                       'exists' % remote_name)
+
+        LOG.info('updating remote %s', remote_name)
+        git.git_remote_set_url(remote_name, url)
+    else:
+        LOG.info('creating remote %s', remote_name)
+        git.git_remote_create(remote_name, url)
+
+    print(fork.web_url)
 
 
 @cli.command()
@@ -208,17 +243,17 @@ def issue():
 
 @issue.command(name='list')
 def issue_list():
-    pass
+    raise click.ClickException('Not implemented')
 
 
 @issue.command(name='create')
 def issue_create():
-    pass
+    raise click.ClickException('Not implemented')
 
 
 @issue.command(name='show')
 def issue_show():
-    pass
+    raise click.ClickException('Not implemented')
 
 
 @cli.group(name='merge-request')
@@ -228,37 +263,37 @@ def merge_request():
 
 @merge_request.command(name='list')
 def mr_list():
-    pass
+    raise click.ClickException('Not implemented')
 
 
 @merge_request.command(name='create')
 def mr_create():
-    pass
+    raise click.ClickException('Not implemented')
 
 
 @merge_request.command(name='show')
 def mr_show():
-    pass
+    raise click.ClickException('Not implemented')
 
 
 @cli.group()
 def snippet():
-    pass
+    raise click.ClickException('Not implemented')
 
 
 @snippet.command(name='list')
 def snippet_list():
-    pass
+    raise click.ClickException('Not implemented')
 
 
 @snippet.command(name='create')
 def snippet_create():
-    pass
+    raise click.ClickException('Not implemented')
 
 
 @snippet.command(name='show')
 def snippet_show():
-    pass
+    raise click.ClickException('Not implemented')
 
 
 @cli.command(name='get-origin')

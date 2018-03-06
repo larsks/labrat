@@ -100,6 +100,9 @@ def cli(ctx, token, url, loglevel, force):
 @click.option('--description', '-d')
 @click.option('--visibility',
               type=click.Choice(['public', 'internal', 'private']))
+@click.option('--public', 'visibility', flag_value='public')
+@click.option('--internal', 'visibility', flag_value='internal')
+@click.option('--private', 'visibility', flag_value='private')
 @click.option('--enable',
               type=click.Choice(GITLAB_PROJECT_FEATURES),
               multiple=True)
@@ -278,16 +281,50 @@ def mr_show():
 
 @cli.group()
 def snippet():
-    raise click.ClickException('Not implemented')
+    pass
 
 
 @snippet.command(name='list')
-def snippet_list():
-    raise click.ClickException('Not implemented')
+@click.pass_context
+def snippet_list(ctx):
+    lab = ctx.obj
+    project = lab.get_project_from_git()
+    for snippet in project.snippets.list():
+        print(f'{snippet.id} {snippet.web_url}')
 
 
 @snippet.command(name='create')
-def snippet_create():
+@click.option('--visibility',
+              type=click.Choice(['public', 'internal', 'private']))
+@click.option('--public', 'visibility', flag_value='public')
+@click.option('--internal', 'visibility', flag_value='internal')
+@click.option('--private', 'visibility', flag_value='private', default=True)
+@click.option('--title', '-t')
+@click.option('--description', '-d')
+@click.option('--name', '-n')
+@click.argument('src', type=click.File('r'))
+@click.pass_context
+def snippet_create(ctx, visibility, title, description, name, src):
+    if name is None:
+        name = src.name
+
+    lab = ctx.obj
+    project = lab.get_project_from_git()
+    data = dict(
+        visibility=visibility,
+        title=title,
+        description=description,
+        file_name=name,
+        code=src.read()
+    )
+    data = {k: v for k, v in data.items() if v is not None}
+
+    snippet = project.snippets.create(data=data)
+    print(f'{snippet.web_url}')
+
+
+@snippet.command(name='delete')
+def snippet_delete():
     raise click.ClickException('Not implemented')
 
 

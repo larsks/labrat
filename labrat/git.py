@@ -29,14 +29,19 @@ def git_config_value(key):
     return value
 
 
-def git_get_origin():
-    tracking = subprocess.check_output(
+def git_get_upstream():
+    upstream = subprocess.check_output(
         ['git', 'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']
     ).strip().decode('utf8')
 
-    LOG.debug('got tracking branch: %s', tracking)
+    return upstream
 
-    remote, branch = tracking.split('/', 1)
+
+def git_get_origin():
+    upstream = git_get_upstream()
+    LOG.debug('got tracking branch: %s', upstream)
+
+    remote, branch = upstream.split('/', 1)
     remote_url = subprocess.check_output(
         ['git', 'ls-remote', '--get-url', remote]
     ).strip().decode('utf8')

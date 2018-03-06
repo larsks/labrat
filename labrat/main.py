@@ -299,3 +299,54 @@ def snippet_show():
 @cli.command(name='get-origin')
 def get_origin():
     print(json.dumps(git.git_get_origin()))
+
+
+@cli.group()
+def branch():
+    pass
+
+
+@branch.command(name='protect')
+@click.argument('branch', required=False)
+@click.pass_context
+def branch_protect(ctx, branch):
+    lab = ctx.obj
+    project = lab.get_project_from_git()
+
+    if branch is None:
+        branch = git.git_get_upstream()
+        remote, branch = branch.split('/', 1)
+
+    LOG.debug('protecting branch %s', branch)
+
+    try:
+        project.protectedbranches.create(dict(name=branch))
+        print(f'protected branch {branch}')
+    except gitlab.exceptions.GitlabCreateError as err:
+        if err.response_code == 409:
+            print(f'Branch {branch} is already protected')
+        else:
+            raise
+
+
+@branch.command(name='unprotect')
+@click.argument('branch', required=False)
+@click.pass_context
+def branch_unprotect(ctx, branch):
+    lab = ctx.obj
+    project = lab.get_project_from_git()
+
+    if branch is None:
+        branch = git.git_get_upstream()
+        remote, branch = branch.split('/', 1)
+
+    LOG.debug('unprotecting branch %s', branch)
+
+    try:
+        project.protectedbranches.delete(id=branch)
+        print(f'unprotected branch {branch}')
+    except gitlab.exceptions.GitlabCreateError as err:
+        if err.response_code == 404:
+            print(f'No such branch named {branch}')
+        else:
+            raise
